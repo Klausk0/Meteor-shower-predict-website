@@ -1,0 +1,62 @@
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+  background: radial-gradient(circle, #000011, #000022, #000033);
+}
+
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+#info-panel {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 300px;
+  padding: 15px;
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  font-size: 14px;
+  border-radius: 10px;
+  display: none;
+  z-index: 1000;
+}
+
+#info-panel h2 {
+  margin: 0 0 10px 0;
+}
+
+#info-panel button {
+  margin-top: 10px;
+  padding: 5px 10px;
+  background-color: #0077ff;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+#controls {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 1000;
+}
+
+#controls label {
+  margin-right: 10px;
+  color: white;
+}
+
+#controls input[type="range"] {
+  margin-right: 10px;
+}
+
+#controls select {
+  padding: 5px;
+  border-radius: 5px;
+  border: none;
+}
