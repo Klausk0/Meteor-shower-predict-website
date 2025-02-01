@@ -1,55 +1,89 @@
 import pandas as pd
+import numpy as np
 import tensorflow as tf
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from sklearn.preprocessing import MinMaxScaler
+import joblib
 
-# Load the model
-model = tf.keras.models.load_model('meteor_rnn_model.keras')
+app = Flask(__name__)
+CORS(app)  # Allow frontend requests
 
-# Load the dataset
-file_path = "meteor_data.csv"
-data = pd.read_csv(file_path)
+# Load the trained model and scaler
+model = tf.keras.models.load_model("meteor_rnn_model.keras")
+scaler = joblib.load("scaler.pkl")
 
-# Display the first few rows of the dataset
-print(data.head())
-
-# Display dataset columns
-print(data.columns)
-
-# Process the dataset for prediction (example)
-X = data.drop(columns=data.columns[-1])  # Drop last column
-X = X.select_dtypes(include=['float64', 'int64']).values  # Ensure numeric only
-X = X.reshape((X.shape[0], X.shape[1], 1))  # Reshape for LSTM input
-
-# Make predictions
-predictions = model.predict(X)
-
-# Show some predictions
-print("Predictions:")
-print(predictions[:5])
-
-@app.route('/get-meteors', methods=['GET'])
-def get_meteors():
+@app.route("/get-meteors", methods=["GET"])
+def get_meteor_predictions():
     try:
-        # Retrieve month parameter
-        month = int(request.args.get('month', -1))
-        if month < 1 or month > 12:
-            return jsonify({'error': 'Invalid month'}), 400
+        month = request.args.get("month", type=int)
+        if not month or month < 1 or month > 12:
+            return jsonify({"error": "Invalid month. Please select a month between 1 and 12."}), 400
+
+        # Load dataset
+        try:
+            data = pd.read_csv("meteor_data.csv")
+        except FileNotFoundError:
+            return jsonify({"error": "Meteor data file not found."}), 500
+
+        # Ensure "date" column exists and convert to datetime
+        if "date" not in data.columns:
+            return jsonify({"error": "Dataset is missing the 'date' column."}), 500
+        data["date"] = pd.to_datetime(data["date"], errors='coerce')
 
         # Filter data for the selected month
-        filtered_data = data[data['month'] == month]
+        month_data = data[data["date"].dt.month == month].copy()
+        if month_data.empty:
+            return jsonify({"error": f"No meteor data available for month {month}."}), 404
 
-        # Prepare data for prediction
-        X = filtered_data.drop(columns=['month', 'other_columns_to_exclude'], errors='ignore')
-        X = X.values.reshape((X.shape[0], X.shape[1], 1))
+        # Check required columns
+        numeric_columns = ["year", "reclat", "reclong"]
+        for col in numeric_columns:
+            if col not in month_data.columns:
+                return jsonify({"error": f"Missing required column: {col}"}), 500
 
-        # Predict meteors
-        predictions = model.predict(X)
-        filtered_data['predictions'] = predictions
+        # Prepare features for prediction
+        month_data_numeric = month_data[numeric_columns].copy()
+        month_data_numeric.fillna(month_data_numeric.mean(), inplace=True)
 
-        # Format response
-        response = [{'x': row['x'], 'y': row['y'], 'z': row['z']} for _, row in filtered_data.iterrows()]
-        return jsonify(response)
+        # Scale data
+        X_scaled = scaler.transform(month_data_numeric)
+
+        # Create sequences
+        timesteps = 10
+        X_sequences = []
+        geo_date_info = []
+
+        for i in range(len(X_scaled) - timesteps):
+            X_sequences.append(X_scaled[i : i + timesteps])
+            geo_date_info.append({
+                "location": str(month_data["GeoLocation"].iloc[i + timesteps]),  
+                "date": month_data["date"].iloc[i + timesteps].strftime('%Y-%m-%d')
+            })
+
+        if not X_sequences:
+            return jsonify({"error": f"Not enough data to generate predictions for month {month}."}), 404
+
+        X_sequences = np.array(X_sequences)
+
+        # Make predictions
+        predictions = model.predict(X_sequences).flatten()
+        predictions = predictions.reshape(-1, 1)
+        predictions = scaler.inverse_transform(
+            np.hstack([predictions, np.zeros((predictions.shape[0], X_sequences.shape[2] - 1))])
+        )[:, 0]
+
+        results = [
+            {"mass": round(pred, 2), "location": info["location"], "date": info["date"]}
+            for pred, info in zip(predictions[:10], geo_date_info)
+        ]
+
+        return jsonify({"month": month, "predictions": results}), 200
+
     except Exception as e:
-        print(f"Error in /get-meteors: {e}")
-        return jsonify({'error': 'Internal server error'}), 500
+        print("Server Error:", str(e))  # Print error in terminal
+        return jsonify({"error": "Internal Server Error", "message": str(e)}), 500
 
+if __name__ == "__main__":
+    app.run(debug=True)
 
